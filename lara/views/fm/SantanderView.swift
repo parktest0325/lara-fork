@@ -466,8 +466,7 @@ private struct santanderdirview: View {
             Text("Delete \(delitem?.name ?? "item")?")
         }
         .sheet(item: $infoitem) { entry in
-            // enable this = instant death
-            //santanderinfosheet(title: entry.name, file: santanderfs.fileDetails(path: entry.path))
+            infosheetcontent(entry: entry)
         }
         .sheet(item: $renameitem) { entry in
             santandernamesheet(
@@ -749,6 +748,29 @@ private struct santanderdirview: View {
             model.load(query: query.trimmingCharacters(in: .whitespacesAndNewlines))
         } catch {
             msg = santandermsg(title: "Upload Failed", text: error.localizedDescription)
+        }
+    }
+}
+
+private struct infosheetcontent: View {
+    let entry: santanderitem
+    @State private var fileInfo: FileInfoProperties?
+    
+    var body: some View {
+        Group {
+            if let info = fileInfo {
+                santanderinfosheet(name: entry.name, file: info)
+            } else {
+                ProgressView()
+                    .onAppear {
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            let info = santanderfs.fileDetails(path: entry.path)
+                            DispatchQueue.main.async {
+                                fileInfo = info
+                            }
+                        }
+                    }
+            }
         }
     }
 }
@@ -1508,56 +1530,93 @@ private struct santanderinfosheet: View {
                 Section {
                     HStack {
                         Image(systemName: file.kind == "directory" ? "folder" : "doc")
-                        VStack {
+                        VStack(alignment: .leading) {
                             Text(name)
+                                .font(.headline)
                             Text("\(file.size) bytes")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
                 
-                Section(header: HeaderLabel(text: "File Information", icon: "info.circle")) {
-                    LabeledContent("UTType") {
+                Section(header: Text("File Information")) {
+                    HStack {
+                        Text("UTType")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Text(file.uttype)
+                            .multilineTextAlignment(.trailing)
                     }
-                    LabeledContent("Creation Date") {
+                    HStack {
+                        Text("Creation Date")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Text(file.created)
+                            .multilineTextAlignment(.trailing)
                     }
-                    LabeledContent("Last Modified") {
+                    HStack {
+                        Text("Last Modified")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Text(file.modified)
+                            .multilineTextAlignment(.trailing)
                     }
-                    LabeledContent("Symlink") {
+                    HStack {
+                        Text("Symlink")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Image(systemName: file.isSymlink ? "checkmark" : "xmark")
                     }
                 }
                 
-                Section(header: HeaderLabel(text: "Permissions", icon: "shield")) {
-                    LabeledContent("POSIX Permissions") {
+                Section(header: Text("Permissions")) {
+                    HStack {
+                        Text("POSIX Permissions")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Text(file.posixPerms)
+                            .font(.system(.body, design: .monospaced))
                     }
-                    LabeledContent("Owner") {
+                    HStack {
+                        Text("Owner")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Text(file.owner)
                     }
-                    LabeledContent("Group") {
+                    HStack {
+                        Text("Group")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Text(file.group)
                     }
-                    LabeledContent("Readable") {
+                    HStack {
+                        Text("Readable")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Image(systemName: file.readable ? "checkmark" : "xmark")
                     }
-                    LabeledContent("Writable") {
+                    HStack {
+                        Text("Writable")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Image(systemName: file.writable ? "checkmark" : "xmark")
                     }
-                    LabeledContent("Executable") {
+                    HStack {
+                        Text("Executable")
+                            .foregroundColor(.secondary)
+                        Spacer()
                         Image(systemName: file.executable ? "checkmark" : "xmark")
                     }
                 }
             }
             .navigationTitle("File Info")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: {
+                    Button("Done") {
                         dismiss()
-                    }) {
-                        Image(systemName: "xmark")
                     }
                 }
             }

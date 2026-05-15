@@ -7,11 +7,28 @@
 
 import SwiftUI
 
+struct procentry: Identifiable, Hashable {
+    let id = UUID()
+    let pid: Int32
+    let name: String
+}
+
 struct ToolsView: View {
+    @ObservedObject private var mgr = laramgr.shared
+    @State private var isaslr: Bool = aslrstate
+    @State var showtoken: Bool = false
+    @AppStorage("lara.sbx.issuedToken") private var token: String = ""
+    @State private var issueclass: tokenclass = .rw
+    @State private var issuepath: String = "/"
+    @State private var uid: uid_t = getuid()
+    @State private var pid: pid_t = getpid()
+    @State private var status: String?
+    @State private var crashname: String = "SpringBoard"
+    
     private enum tokenclass: String, CaseIterable, Identifiable {
         case read = "com.apple.app-sandbox.read"
         case write = "com.apple.app-sandbox.write"
-        case readWrite = "com.apple.app-sandbox.read-write"
+        case rw = "com.apple.app-sandbox.read-write"
 
         var id: String { rawValue }
 
@@ -19,20 +36,10 @@ struct ToolsView: View {
             switch self {
             case .read: return "read"
             case .write: return "write"
-            case .readWrite: return "read-write"
+            case .rw: return "read-write"
             }
         }
     }
-
-    @ObservedObject private var mgr = laramgr.shared
-    @State private var isaslr: Bool = aslrstate
-    @State var showtoken: Bool = false
-    @AppStorage("lara.sbx.issuedToken") private var token: String = ""
-    @State private var issueclass: tokenclass = .readWrite
-    @State private var issuepath: String = "/"
-    @State private var uid: uid_t = getuid()
-    @State private var pid: pid_t = getpid()
-    @State private var status: String?
     
     var body: some View {
         List {
@@ -132,14 +139,27 @@ struct ToolsView: View {
             }
 
             Section {
-                NavigationLink("LaraJIT") {
-                    JitView()
+                HStack {
+                    Text("Process: ")
+                    Spacer()
+                    TextField("e.g. SpringBoard", text: $crashname)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .foregroundColor(.secondary)
+                        .monospaced()
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-                .disabled(!mgr.dsready)
+
+                Button("Crash") {
+                    crashname.withCString { cstr in
+                        _ = crashproc(cstr)
+                    }
+                }
+                .disabled(crashname.isEmpty)
             } header: {
-                Text("JIT")
+                Text("Crasher")
             } footer: {
-                Text("Only works on apps with the `get-task-allow` entitlement.")
+                Text("Crashes the selected process")
             }
 
             Section {
