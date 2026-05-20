@@ -27,6 +27,7 @@
 		15F024352FBB9510004BD090 /* podBackgroundViewDark.visualstyleset in Resources */ = {isa = PBXBuildFile; fileRef = 15F023FC2FBB9510004BD090 /* podBackgroundViewDark.visualstyleset */; };
 		9F4A1D2F3C4E567890123456 /* lara/lib/libxpf.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9F4A1D2E3C4E567890123456 /* lara/lib/libxpf.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		9F4A1D423C4E567890123456 /* lara/lib/libgrabkernel2.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9F4A1D413C4E567890123456 /* lara/lib/libgrabkernel2.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		CD22E7942FBB416D00824D68 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = CD22E7932FBB416600824D68 /* libz.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -78,6 +79,8 @@
 		9F4A1D413C4E567890123456 /* lara/lib/libgrabkernel2.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = lara/lib/libgrabkernel2.dylib; sourceTree = "<group>"; };
 		CC1C8B392F71DF9C00206982 /* lara.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = lara.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CC6842DF2F8311C300B08EB0 /* libSystem.B.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libSystem.B.tbd; path = usr/lib/libSystem.B.tbd; sourceTree = SDKROOT; };
+		CD22E7862FBA18DF00824D68 /* libarchive.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libarchive.tbd; path = usr/lib/libarchive.tbd; sourceTree = SDKROOT; };
+		CD22E7932FBB416600824D68 /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -106,6 +109,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CD22E7942FBB416D00824D68 /* libz.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -241,6 +245,8 @@
 		CC6842DE2F8311C300B08EB0 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				CD22E7932FBB416600824D68 /* libz.tbd */,
+				CD22E7862FBA18DF00824D68 /* libarchive.tbd */,
 				CC6842DF2F8311C300B08EB0 /* libSystem.B.tbd */,
 			);
 			name = Frameworks;

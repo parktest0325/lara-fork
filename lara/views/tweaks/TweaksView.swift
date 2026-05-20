@@ -17,8 +17,6 @@ struct TweaksView: View {
                 Section(header: HeaderLabel(text: "SpringBoard", icon: "house")) {
                     NavigationLink("RemoteCall Customizer", destination: RemoteView(mgr: mgr))
                         .disabled(!mgr.rcready)
-                    NavigationLink("DarkBoard", destination: DarkBoardView())
-                        .disabled(true)
                     NavigationLink("Liquid Glass", destination: LiquidGlassView())
                         .disabled(!mgr.vfsready)
                     if doubleSystemVersion() < 26.0 {
@@ -59,6 +57,11 @@ struct TweaksView: View {
                         .disabled(!mgr.sbxready)
                     NavigationLink("Custom Overwrite", destination: CustomView(mgr: mgr))
                         .disabled(!mgr.vfsready)
+                }
+                
+                Section(header: HeaderLabel(text: "Broken", icon: "exclamationmark.triangle.fill")) {
+                    NavigationLink("DarkBoard", destination: DarkBoardView())
+                        .disabled(true)
                 }
                 
                 NavigationLink("Extra Tools", destination: ToolsView())

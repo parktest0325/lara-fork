@@ -10,6 +10,15 @@ import UniformTypeIdentifiers
 import AVKit
 import UIKit
 import Combine
+import Foundation
+
+enum SantanderChown {
+    static func chown(path: String, uid: UInt32, gid: UInt32) -> Bool {
+        path.withCString {
+            apfs_own($0, uid, gid) == 0
+        }
+    }
+}
 
 struct SantanderView: View {
     let startpath: String

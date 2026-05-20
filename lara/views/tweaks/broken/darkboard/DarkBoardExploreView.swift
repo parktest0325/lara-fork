@@ -12,6 +12,7 @@ struct DarkBoardExploreView: View {
     @State private var filter: IconThemeGalleryFilter = .random
     @State private var searchTerm = ""
     @State private var alert: DarkBoardExploreAlert?
+    @State private var displayedThemes: [GalleryTheme] = []
 
     var body: some View {
         ScrollView {
@@ -25,15 +26,24 @@ struct DarkBoardExploreView: View {
         .searchable(text: $searchTerm, prompt: "Search themes or authors")
         .refreshable {
             await gallery.loadThemes(forceRefresh: true)
+            updateDisplayedThemes()
         }
         .task {
             if gallery.themes.isEmpty {
                 await gallery.loadThemes()
             }
+            updateDisplayedThemes()
         }
-        .alert(item: $alert) { alert in
-            Alert(title: Text("Theme Gallery"), message: Text(alert.message), dismissButton: .default(Text("OK")))
+        .onChange(of: searchTerm)     { _ in updateDisplayedThemes() }
+        .onChange(of: filter)         { _ in updateDisplayedThemes() }
+        .onChange(of: gallery.themes) { _ in updateDisplayedThemes() }
+        .alert(item: $alert) { a in
+            Alert(title: Text("Theme Gallery"), message: Text(a.message), dismissButton: .default(Text("OK")))
         }
+    }
+
+    private func updateDisplayedThemes() {
+        displayedThemes = gallery.filteredThemes(searchTerm: searchTerm, filter: filter)
     }
 
     private var filterBar: some View {
@@ -57,9 +67,7 @@ struct DarkBoardExploreView: View {
                     .background(.thinMaterial)
                     .clipShape(Capsule())
             }
-
             Spacer()
-
             if gallery.isLoading {
                 ProgressView()
                     .controlSize(.small)
@@ -79,6 +87,7 @@ struct DarkBoardExploreView: View {
                 Button("Retry") {
                     Task {
                         await gallery.loadThemes(forceRefresh: true)
+                        updateDisplayedThemes()
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -106,7 +115,7 @@ struct DarkBoardExploreView: View {
         } else {
             LazyVStack(spacing: 14) {
                 ForEach(displayedThemes) { theme in
-                    GalleryThemeCard(theme: theme, isImported: themes.theme(named: theme.name) != nil, isDownloading: gallery.isDownloading(theme)) {
+                    GalleryThemeCard(theme: theme, previewURL: gallery.previewURL(for: theme), isImported: themes.theme(named: theme.name) != nil, isDownloading: gallery.isDownloading(theme)) {
                         Task {
                             do {
                                 try await gallery.downloadAndImport(theme)
@@ -120,23 +129,18 @@ struct DarkBoardExploreView: View {
             }
         }
     }
-
-    private var displayedThemes: [GalleryTheme] {
-        gallery.filteredThemes(searchTerm: searchTerm, filter: filter)
-    }
 }
 
 private struct GalleryThemeCard: View {
-    @ObservedObject private var gallery = IconThemeGalleryManager.shared
-
     let theme: GalleryTheme
+    let previewURL: URL?
     let isImported: Bool
     let isDownloading: Bool
     let onDownload: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let previewURL = gallery.previewURL(for: theme) {
+            if let previewURL {
                 AsyncImage(url: previewURL) { phase in
                     switch phase {
                     case let .success(image):
@@ -146,11 +150,7 @@ private struct GalleryThemeCard: View {
                             .frame(height: 180)
                             .frame(maxWidth: .infinity)
                             .clipped()
-                    case .failure(_):
-                        previewPlaceholder
-                    case .empty:
-                        previewPlaceholder
-                    @unknown default:
+                    default:
                         previewPlaceholder
                     }
                 }
@@ -176,14 +176,10 @@ private struct GalleryThemeCard: View {
                             .foregroundStyle(.green)
                     }
                 }
-
                 Text(theme.description)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
 
                 Button {
-                    onDownload()
+                    Task { await onDownload() }
                 } label: {
                     HStack {
                         if isDownloading {
@@ -191,15 +187,19 @@ private struct GalleryThemeCard: View {
                                 .controlSize(.small)
                                 .tint(.white)
                         } else {
-                            Image(systemName: isImported ? "arrow.triangle.2.circlepath" : "arrow.down.circle")
+                            Image(systemName: isImported
+                                  ? "arrow.triangle.2.circlepath"
+                                  : "arrow.down.circle")
                         }
+
                         Text(isImported ? "Reimport Theme" : "Import Theme")
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                 }
-                .disabled(isDownloading)
                 .buttonStyle(.borderedProminent)
+                .disabled(isDownloading)
+                .contentShape(Rectangle())
             }
             .padding()
         }
@@ -214,8 +214,6 @@ private struct GalleryThemeCard: View {
                 .font(.system(size: 34, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .frame(height: 180)
-        .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .frame(height: 180).frame(maxWidth: .infinity)
     }
 }

@@ -1,5 +1,4 @@
 import Combine
-import Compression
 import Foundation
 import SwiftUI
 import UIKit
@@ -8,6 +7,7 @@ private let iconThemeStorageRoot = URL(fileURLWithPath: "/var/mobile/.DO-NOT-DEL
 private let rawThemesDir = iconThemeStorageRoot.appendingPathComponent("RawThemes", isDirectory: true)
 private let processedThemesDir = iconThemeStorageRoot.appendingPathComponent("ProcessedThemes", isDirectory: true)
 private let originalIconsDir = iconThemeStorageRoot.appendingPathComponent("OriginalIconsBackup", isDirectory: true)
+private func clearIconCache() { LaraClearIconCache() }
 
 struct LaraIconTheme: Identifiable, Equatable, Hashable {
     let name: String
@@ -158,9 +158,20 @@ struct LaraThemedApp: Identifiable, Hashable {
             }
 
             guard let cachedIcon else { continue }
-            let result = laramgr.shared.lara_overwritefile(target: iconURL.path, data: cachedIcon)
-            if !result.ok {
-                throw NSError(domain: "IconThemer", code: 6, userInfo: [NSLocalizedDescriptionKey: "\(bundleIdentifier): \(result.message)"])
+            
+            let chown1 = SantanderChown.chown( path: iconURL.path, uid: 501, gid: 501)
+            if(!chown1) {
+                throw NSError(domain: "IconThemer", code: 6, userInfo: [NSLocalizedDescriptionKey: "\(bundleIdentifier): 1st chown failed"])
+            }
+            
+            let overwrite = laramgr.shared.lara_overwritefile(target: iconURL.path, data: cachedIcon)
+            if !overwrite.ok {
+                throw NSError(domain: "IconThemer", code: 6, userInfo: [NSLocalizedDescriptionKey: "\(bundleIdentifier): \(overwrite.message)"])
+            }
+            
+            let chown2 = SantanderChown.chown( path: iconURL.path, uid: 33, gid: 33)
+            if(!chown2) {
+                throw NSError(domain: "IconThemer", code: 6, userInfo: [NSLocalizedDescriptionKey: "\(bundleIdentifier): 2nd chown failed"])
             }
         }
     }
@@ -184,6 +195,7 @@ final class IconThemeManager: ObservableObject {
     @Published var fixupProgress: Double = 0
     @Published var fixupMessage = ""
     @Published var showFixupSheet = false
+    private let mgr = laramgr.shared
 
     private let fm = FileManager.default
     private let selectedThemesKey = "lara.iconThemes.selectedThemes"
@@ -223,6 +235,13 @@ final class IconThemeManager: ObservableObject {
             result[bundleID] = LaraThemedIcon(appID: bundleID, themeName: themeName)
         }
         return result
+    }
+    
+    func icon_logmsg(_ message: String) {
+        DispatchQueue.main.async {
+            self.mgr.log += "(icon) " + message + "\n"
+            globallogger.log("(icon) " + message)
+        }
     }
 
     func theme(named name: String) -> LaraIconTheme? {
@@ -374,10 +393,38 @@ final class IconThemeManager: ObservableObject {
                 try fm.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
                 defer { try? fm.removeItem(at: tempDir) }
 
+                let extractDir = tempDir.appendingPathComponent("Extracted", isDirectory: true)
+                try fm.createDirectory(at: extractDir, withIntermediateDirectories: true, attributes: nil)
+                
                 let archivePath = tempDir.appendingPathComponent("import.\(ext == "zip" ? "zip" : "theme")")
                 try Data(contentsOf: workingURL).write(to: archivePath)
-                try unzipFile(at: archivePath, to: tempDir)
-                sourceDirectory = try resolveThemeSourceDirectory(from: tempDir)
+                try unzipFile(at: archivePath, to: extractDir)
+                let resolvedSource = try resolveThemeSourceDirectory(from: extractDir)
+                let themeURL = rawThemesDir.appendingPathComponent(finalThemeName, isDirectory: true)
+                try? fm.removeItem(at: themeURL)
+                try fm.createDirectory(at: themeURL, withIntermediateDirectories: true, attributes: nil)
+
+                for icon in (try? fm.contentsOfDirectory(at: resolvedSource, includingPropertiesForKeys: nil)) ?? [] {
+                    guard icon.pathExtension.lowercased() == "png" else { continue }
+                    let appID = appIDFromIcon(url: icon)
+                    let destination = themeURL.appendingPathComponent(appID + ".png")
+                    try? fm.removeItem(at: destination)
+                    do {
+                        try fm.copyItem(at: icon, to: destination)
+                        icon_logmsg("copied icon: \(appID)")
+                    } catch {
+                        icon_logmsg("copy fail: \(appID) -> \(error.localizedDescription)")
+                    }
+                }
+
+                let importedIcons = ((try? fm.contentsOfDirectory(at: themeURL, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension.lowercased() == "png" }
+                if importedIcons.isEmpty {
+                    try? fm.removeItem(at: themeURL)
+                    throw NSError(domain: "IconThemer", code: 9, userInfo: [NSLocalizedDescriptionKey: "No icons were found in the imported theme. Expected `<bundle-id>.png` in a folder."])
+                }
+
+                refreshThemes()
+                return
             } else {
                 throw NSError(domain: "IconThemer", code: 8, userInfo: [NSLocalizedDescriptionKey: "Unsupported theme import type: \(workingURL.lastPathComponent)"])
             }
@@ -392,13 +439,18 @@ final class IconThemeManager: ObservableObject {
             let appID = appIDFromIcon(url: icon)
             let destination = themeURL.appendingPathComponent(appID + ".png")
             try? fm.removeItem(at: destination)
-            try fm.copyItem(at: icon, to: destination)
+            do {
+                try fm.copyItem(at: icon, to: destination)
+                icon_logmsg("copied icon: \(appID)")
+            } catch {
+                icon_logmsg("copy fail: \(appID) -> \(error.localizedDescription)")
+            }
         }
 
         let importedIcons = ((try? fm.contentsOfDirectory(at: themeURL, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension.lowercased() == "png" }
         if importedIcons.isEmpty {
             try? fm.removeItem(at: themeURL)
-            throw NSError(domain: "IconThemer", code: 9, userInfo: [NSLocalizedDescriptionKey: "No icons were found in the imported theme. Expected `IconBundles/<bundle-id>.png`."])
+            throw NSError(domain: "IconThemer", code: 9, userInfo: [NSLocalizedDescriptionKey: "No icons were found in the imported theme. Expected `<bundle-id>.png` in a folder."])
         }
 
         refreshThemes()
@@ -565,25 +617,72 @@ final class IconThemeManager: ObservableObject {
     }
 
     private func resolveThemeSourceDirectory(from url: URL) throws -> URL {
+        icon_logmsg("resolve theme directory: \(url.path)")
+
         if url.lastPathComponent == "IconBundles" {
+            icon_logmsg("using root iconbundles")
             return url
         }
 
         let iconBundlesURL = url.appendingPathComponent("IconBundles", isDirectory: true)
         if fm.fileExists(atPath: iconBundlesURL.path) {
+            icon_logmsg("found direct iconbundles: \(iconBundlesURL.path)")
             return iconBundlesURL
         }
 
-        if let nested = try findIconBundlesDirectory(in: url) {
-            return nested
+        if let subdir = try findIconBundlesDirectory(in: url) {
+            icon_logmsg("found iconbundles in a subdirectory: \(subdir.path)")
+            return subdir
         }
 
-        let pngs = ((try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension.lowercased() == "png" }
-        if !pngs.isEmpty {
-            return url
+        if let pngDir = findFirstDirectoryContainingPNGs(in: url) {
+            icon_logmsg("found png directory: \(pngDir.path)")
+            return pngDir
         }
 
-        throw NSError(domain: "IconThemer", code: 10, userInfo: [NSLocalizedDescriptionKey: "Could not find `IconBundles` in \(url.lastPathComponent)"])
+        icon_logmsg("failed to find theme directory")
+
+        throw NSError(domain: "IconThemer", code: 10, userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Could not find icons in \(url.lastPathComponent). Expected PNGs named <bundle-id>.png."
+            ]
+        )
+    }
+
+    private func findFirstDirectoryContainingPNGs(in root: URL) -> URL? {
+        icon_logmsg("scanning root: \(root.path)")
+
+        let rootPNGs = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil))?.filter { $0.pathExtension.lowercased() == "png" } ?? []
+
+        if !rootPNGs.isEmpty {
+            icon_logmsg("found png-s in root: \(root.path)")
+            for png in rootPNGs {
+                icon_logmsg("png: \(png.lastPathComponent)")
+            }
+            return root
+        }
+
+        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+        ) else {
+            icon_logmsg("failed to create enumerator")
+            return nil
+        }
+
+        for case let url as URL in enumerator {
+            icon_logmsg("scanning directory \(url.path) ...")
+
+            guard (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+
+            let pngs = (try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil))?.filter { $0.pathExtension.lowercased() == "png" } ?? []
+
+            if !pngs.isEmpty {
+                icon_logmsg("found png-s: \(url.path)")
+                for png in pngs { icon_logmsg("png: \(png.lastPathComponent)") }
+                return url
+            } else { icon_logmsg("no png-s: \(url.lastPathComponent)") }
+        }
+        icon_logmsg("no directories found containing .png-s")
+        return nil
     }
 
     private func sanitizedThemeName(_ name: String) -> String {
@@ -608,84 +707,81 @@ final class IconThemeManager: ObservableObject {
         return nil
     }
 
-    private func unzipFile(at source: URL, to destination: URL) throws {
-        let fileData = try Data(contentsOf: source)
-        var offset = 0
+    func unzipFile(at source: URL, to destination: URL) throws {
+        try FileManager.default.createDirectory(
+            at: destination,
+            withIntermediateDirectories: true
+        )
 
-        while offset < fileData.count - 4 {
-            let signature = fileData.subdata(in: offset..<offset + 4).withUnsafeBytes { $0.load(as: UInt32.self) }
-            guard signature == 0x04034b50 else { break }
-            guard let entry = readLocalFileEntry(data: fileData, offset: offset) else { break }
+        let archive = try ZipArchive(data: try Data(contentsOf: source))
+        icon_logmsg("zip entries: \(archive.entries.count)")
 
-            let nameRange = offset + 30..<(offset + 30 + entry.nameLength)
-            let entryName = String(data: fileData.subdata(in: nameRange), encoding: .utf8) ?? ""
-            let contentOffset = offset + 30 + entry.nameLength + entry.extraLength
+        for entry in archive.entries {
+            icon_logmsg("entry: \(entry.path)")
 
-            if !entryName.hasSuffix("/") {
-                let entryDestination = destination.appendingPathComponent(entryName)
-                let parentDir = entryDestination.deletingLastPathComponent()
-                try fm.createDirectory(at: parentDir, withIntermediateDirectories: true, attributes: nil)
+            let normalizedPath = entry.path.replacingOccurrences(of: "\\", with: "/")
+            let outputURL = destination.appendingPathComponent(normalizedPath)
 
-                let fileRange = contentOffset..<(contentOffset + entry.compressedSize)
-                if entry.compressionMethod == 0 {
-                    let fileEntryData = fileData.subdata(in: fileRange)
-                    try fileEntryData.write(to: entryDestination)
-                } else if entry.compressionMethod == 8 {
-                    let compressedData = fileData.subdata(in: fileRange)
-                    guard let decompressed = decompress(deflate: compressedData, originalSize: entry.uncompressedSize) else {
-                        throw NSError(domain: "IconThemer", code: 11, userInfo: [NSLocalizedDescriptionKey: "Failed to decompress \(entryName)"])
-                    }
-                    try decompressed.write(to: entryDestination)
-                }
+            icon_logmsg("output: \(outputURL.path)")
+
+            guard !normalizedPath.contains("..") else {
+                icon_logmsg("skip path traversal: \(normalizedPath)")
+                continue
             }
 
-            offset += 30 + entry.nameLength + entry.extraLength + entry.compressedSize
-        }
-    }
+            if entry.isDirectory {
+                do {
+                    try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
+                } catch {
+                    icon_logmsg("mkdir fail: \(error.localizedDescription)")
+                }
 
-    private struct ZipEntry {
-        let compressionMethod: UInt16
-        let compressedSize: Int
-        let uncompressedSize: Int
-        let nameLength: Int
-        let extraLength: Int
-    }
+            } else {
 
-    private func readLocalFileEntry(data: Data, offset: Int) -> ZipEntry? {
-        guard offset + 30 <= data.count else { return nil }
-
-        let compressionMethod = data.subdata(in: offset + 8..<offset + 10).withUnsafeBytes { $0.load(as: UInt16.self) }
-        let compressedSize = Int(data.subdata(in: offset + 18..<offset + 22).withUnsafeBytes { $0.load(as: UInt32.self) })
-        let uncompressedSize = Int(data.subdata(in: offset + 22..<offset + 26).withUnsafeBytes { $0.load(as: UInt32.self) })
-        let nameLength = Int(data.subdata(in: offset + 26..<offset + 28).withUnsafeBytes { $0.load(as: UInt16.self) })
-        let extraLength = Int(data.subdata(in: offset + 28..<offset + 30).withUnsafeBytes { $0.load(as: UInt16.self) })
-
-        return ZipEntry(compressionMethod: compressionMethod, compressedSize: compressedSize, uncompressedSize: uncompressedSize, nameLength: nameLength, extraLength: extraLength)
-    }
-
-    private func decompress(deflate data: Data, originalSize: Int) -> Data? {
-        guard originalSize > 0 else { return Data() }
-
-        let destinationBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: originalSize)
-        defer { destinationBuffer.deallocate() }
-
-        let result = data.withUnsafeBytes { sourceBuffer -> Int in
-            guard let baseAddress = sourceBuffer.baseAddress else { return 0 }
-            return compression_decode_buffer(
-                destinationBuffer,
-                originalSize,
-                baseAddress.assumingMemoryBound(to: UInt8.self),
-                data.count,
-                nil,
-                COMPRESSION_ZLIB
-            )
+                do {
+                    try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    let extracted = try archive.extract(entry)
+                    icon_logmsg("extracted size: \(extracted.count)")
+                    
+                    try extracted.write(to: outputURL)
+                    icon_logmsg("wrote to file")
+                } catch { icon_logmsg("extract fail: \(entry.path) to \(error.localizedDescription)") }
+            }
         }
 
-        return result == originalSize ? Data(bytes: destinationBuffer, count: originalSize) : nil
-    }
+        icon_logmsg("contents:")
 
-    private func clearIconCache() {
-        LaraClearIconCache()
+        if let e = FileManager.default.enumerator(at: destination, includingPropertiesForKeys: nil) { for case let fileURL as URL in e { icon_logmsg(fileURL.path) } }
+    }
+    
+    private func findNextZipHeader(
+        in data: Data,
+        start: Int
+    ) -> Int? {
+
+        guard start < data.count - 4 else { return nil }
+
+        for i in start..<(data.count - 4) {
+
+            let sig = data.subdata(in: i..<i + 4)
+                .withUnsafeBytes {
+                    UInt32(littleEndian: $0.load(as: UInt32.self))
+                }
+
+            if sig == 0x04034b50 {
+                return i
+            }
+
+            if sig == 0x02014b50 {
+                return i
+            }
+
+            if sig == 0x06054b50 {
+                return i
+            }
+        }
+
+        return nil
     }
 }
 
