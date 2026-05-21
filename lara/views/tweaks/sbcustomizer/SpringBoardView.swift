@@ -102,6 +102,7 @@ struct SpringBoardView: View {
                         .labelsHidden()
                         .pickerStyle(.segmented)
                         .onChange(of: option.selectedOption) { newvalue in
+                            option.value = newvalue
                             UserDefaults.standard.set(newvalue, forKey: option.key)
                         }
                         if option.selectedOption == "Color" || option.selectedOption == "Blur" {
