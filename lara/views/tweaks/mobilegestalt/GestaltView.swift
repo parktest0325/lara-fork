@@ -287,56 +287,7 @@ struct GestaltView: View {
                 } header: {
                     HeaderLabel(text: "SpringBoard", icon: "gear")
                 }
-                
-                Section {
-                    PlainToggle(
-                        text: "Disable Lock After Respring",
-                        icon: "lock.open",
-                        isOn: nuggetbinding(
-                            "SBDontLockAfterCrash",
-                            path: fileloc.springboard.rawValue
-                        )
-                    )
 
-                    PlainToggle(
-                        text: "Disable Low Battery Alerts",
-                        icon: "battery.25",
-                        isOn: nuggetbinding(
-                            "SBHideLowPowerAlerts",
-                            path: fileloc.springboard.rawValue
-                        )
-                    )
-
-                    PlainToggle(
-                        text: "Show Dynamic Island in Screenshots",
-                        icon: "camera",
-                        isOn: nuggetbinding(
-                            "SBAlwaysShowSystemApertureInSnapshots",
-                            path: fileloc.springboard.rawValue
-                        )
-                    )
-
-                    PlainToggle(
-                        text: "Play Sound on Paste",
-                        icon: "speaker.wave.2",
-                        isOn: nuggetbinding(
-                            "PlaySoundOnPaste",
-                            path: fileloc.pasteboard.rawValue
-                        )
-                    )
-
-                    PlainToggle(
-                        text: "System Paste Notifications",
-                        icon: "doc.on.clipboard",
-                        isOn: nuggetbinding(
-                            "AnnounceAllPastes",
-                            path: fileloc.pasteboard.rawValue
-                        )
-                    )
-                } header: {
-                    HeaderLabel(text: "Internal", icon: "ant")
-                }
-                
                 Section {
                     PlainToggle(
                         text: "Metal HUD Debug",
