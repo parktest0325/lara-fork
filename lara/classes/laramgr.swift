@@ -258,6 +258,17 @@ final class laramgr: ObservableObject {
                 self.sbxrunning = false
                 completion?(self.sbxready)
             }
+
+            // Best-effort broad-access pass via a separate launchd RemoteCall session.
+            // RemoteCall calls are internally clamped to a 10s+ timeout each, so this
+            // can take a while when a path is unresponsive — it must never delay the
+            // "sandbox escape ready" result above, only add to the log afterward.
+            guard r == 0 else { return }
+            let newlyUnlocked = sbx_escape_via_launchd()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, newlyUnlocked >= 0 else { return }
+                self.logmsg("(sbx) launchd broad access: \(newlyUnlocked) path(s) newly unlocked (see log above for per-path before/after)\n")
+            }
         }
     }
     

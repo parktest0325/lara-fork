@@ -2,3 +2,5 @@ Resources/*
 xcuserdata/
 *.xcuserstate
 .DS_Store
+DarkSword*
+_tmp

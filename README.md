@@ -77,6 +77,7 @@ Important Notes:
 - Custom Overwrite
 - Card Overwrite
 - File Manager (Full Disk r/w)
+- Local File Server (HTTP — pull the whole filesystem to a computer)
 - MobileGestalt Editor
 - 3 App Bypass
 - DirtyZero 2
@@ -95,6 +96,12 @@ Important Notes:
 
 ### Coming Soon
 - FTP Server
+
+> **Local File Server:** On the home screen under **Actions**, tap **Start Local Server** (requires filesystem access — run the exploit and Initialize System first). It shows a `http://<device-ip>:8080` URL and a password. From a computer on the same Wi‑Fi, browse it, or pull the entire filesystem (resumable) with:
+> ```sh
+> wget -r -np -c --user=lara --password=<password> http://<device-ip>:8080/
+> ```
+> The server is read-only and keeps the app awake during transfers.
 
 ## Known Issues
 - wont work on M5, A19 and A19 Pro due to MTE

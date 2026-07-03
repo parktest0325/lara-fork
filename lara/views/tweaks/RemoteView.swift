@@ -16,11 +16,9 @@ struct RemoteView: View {
     @State private var performanceHUD: Int = -1
     @AppStorage("rcdockunlimited") private var rcdockunlimited: Bool = false
     @State private var customProcessName: String = "SpringBoard"
-    @State private var customFunctionName: String = "getpid"
-    @State private var customArgsText: String = ""
-    @State private var customTimeoutMs: Int = 100
-    @State private var customMigBypass: Bool = false
+    @State private var customFilePath: String = "/var/mobile/Library/Preferences/com.apple.springboard.plist"
     @State private var customLastResult: String = ""
+    @State private var customLastFileData: Data? = nil
     @State private var hsRows: Int = 6
     @State private var hsColumns: Int = 4
     @State private var freakyrunning: Bool = false
@@ -332,82 +330,23 @@ struct RemoteView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
 
-                HStack {
-                    TextField("Function (symbol or 0xaddr)", text: $customFunctionName)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .lineLimit(1)
-                    
-                    TextEditor(text: $customArgsText)
-                        .font(.system(.body, design: .monospaced))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-
-                Stepper(value: $customTimeoutMs, in: 10...5000, step: 10) {
-                    HStack {
-                        Text("Timeout")
-                        Spacer()
-                        Text("\(customTimeoutMs) ms")
-                            .foregroundColor(.secondary)
-                            .monospacedDigit()
-                    }
-                }
-
-                Toggle("MIG filter bypass", isOn: $customMigBypass)
+                TextField("File path", text: $customFilePath)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .lineLimit(1)
 
                 Button {
-                    run("Custom RemoteCall \(customProcessName):\(customFunctionName)") {
-                        let process = customProcessName.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let function = customFunctionName.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !process.isEmpty else { return "custom: missing process name" }
-                        guard !function.isEmpty else { return "custom: missing function name" }
-
-                        let (args, parseError) = parseRemoteCallArgs(customArgsText)
-                        if let parseError {
-                            return "custom: args parse error: \(parseError)"
-                        }
-
-                        let ptr: UnsafeMutableRawPointer?
-                        if let addr = parseAddress(function) {
-                            ptr = UnsafeMutableRawPointer(bitPattern: UInt(addr))
-                        } else {
-                            let RTLD_DEFAULT = UnsafeMutableRawPointer(bitPattern: -2)
-                            ptr = function.withCString { dlsym(RTLD_DEFAULT, $0) }
-                        }
-
-                        guard let ptr else {
-                            return "custom: failed to resolve \(function)"
-                        }
-
-                        guard let proc = RemoteCall(process: process, useMigFilterBypass: customMigBypass) else {
-                            return "custom: RemoteCall init failed for \(process)"
-                        }
-                        defer { proc.destroy() }
-
-                        var argsCopy = args
-                        let ret = function.withCString { (cName: UnsafePointer<CChar>) -> UInt64 in
-                            UInt64(argsCopy.withUnsafeMutableBufferPointer { buffer in
-                                proc.doStable(
-                                    withTimeout: Int32(customTimeoutMs),
-                                    functionName: UnsafeMutablePointer(mutating: cName),
-                                    functionPointer: ptr,
-                                    args: buffer.baseAddress,
-                                    argCount: UInt(args.count)
-                                )
-                            })
-                        }
-
-                        let err = proc.lastError ?? ""
-                        let suffix = err.isEmpty ? "" : " (err: \(err))"
-                        return "custom: \(process) \(function)(\(args.count) args) -> 0x\(String(ret, radix: 16)) / \(ret)\(suffix)"
+                    var fetchedData: Data? = nil
+                    run("Read File \(customFilePath) via \(customProcessName)") {
+                        let result = self.readRemoteFile(process: self.customProcessName, path: self.customFilePath)
+                        fetchedData = result.data
+                        return result.message
                     } onComplete: { msg in
                         self.customLastResult = msg
+                        self.customLastFileData = fetchedData
                     }
                 } label: {
-                    Text("Call")
+                    Text("Read File")
                 }
 
                 if !customLastResult.isEmpty {
@@ -416,10 +355,24 @@ struct RemoteView: View {
                         .foregroundColor(.secondary)
                         .textSelection(.enabled)
                 }
+
+                if let data = customLastFileData {
+                    Text(previewString(for: data))
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(10)
+
+                    Button {
+                        saveLastFileDataToDocuments()
+                    } label: {
+                        Text("Save to App Documents")
+                    }
+                }
             } header: {
-                Text("Custom RemoteCall")
+                Text("Remote File Reader")
             } footer: {
-                Text("Calls a symbol (via dlsym) or an absolute address. Numeric args are passed as x0-x7 then stack.")
+                Text("Opens, reads, and closes the file inside the target process (so it's read under that process's file access), then copies the bytes back. Read-only — never writes to the remote file.")
             }
             .disabled(!mgr.rcready || running)
 
@@ -604,56 +557,50 @@ struct RemoteView: View {
         mgr.logmsg("(rc) disable_freaky_dog_overlay() -> \(result)")
     }
 
-    private func parseRemoteCallArgs(_ text: String) -> (args: [UInt64], error: String?) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return ([], nil) }
+    /// Runs on a background queue (called from inside `run`'s work closure).
+    /// Pulled out of the button's `body` expression because the extra guards/
+    /// NSString bridging inline was enough to blow up SwiftUI's type-checker.
+    private func readRemoteFile(process rawProcess: String, path rawPath: String) -> (message: String, data: Data?) {
+        let process = rawProcess.trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !process.isEmpty else { return ("custom: missing process name", nil) }
+        guard !path.isEmpty else { return ("custom: missing file path", nil) }
 
-        let separators = CharacterSet(charactersIn: ", \t\r\n")
-        let tokens = trimmed
-            .components(separatedBy: separators)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        guard let proc = RemoteCall(process: process, useMigFilterBypass: false) else {
+            return ("custom: RemoteCall init failed for \(process)", nil)
+        }
+        defer { proc.destroy() }
 
-        var out: [UInt64] = []
-        out.reserveCapacity(tokens.count)
-
-        for token in tokens {
-            if let value = parseUInt64OrInt64BitPattern(token) {
-                out.append(value)
-            } else {
-                return ([], "bad token '\(token)'")
-            }
+        var errorMessage: NSString?
+        guard let data = rc_read_remote_file(proc, path, &errorMessage) else {
+            let errorText = (errorMessage as String?) ?? "unknown error"
+            return ("custom: read failed: \(errorText)", nil)
         }
 
-        return (out, nil)
+        return ("custom: read \(path) via \(process) -> \(data.count) bytes", data)
     }
 
-    private func parseUInt64OrInt64BitPattern(_ token: String) -> UInt64? {
-        if token.hasPrefix("-") {
-            let rest = String(token.dropFirst())
-            if rest.lowercased().hasPrefix("0x") {
-                let hex = String(rest.dropFirst(2))
-                guard let magnitude = UInt64(hex, radix: 16) else { return nil }
-                let signed = -Int64(bitPattern: magnitude)
-                return UInt64(bitPattern: signed)
-            } else {
-                guard let signed = Int64(rest) else { return nil }
-                return UInt64(bitPattern: -signed)
-            }
+    private func previewString(for data: Data, maxBytes: Int = 2048) -> String {
+        let slice = data.prefix(maxBytes)
+        let more = data.count > maxBytes ? "\n… (+\(data.count - maxBytes) more bytes)" : ""
+        if let text = String(data: slice, encoding: .utf8) {
+            return text + more
         }
-
-        if token.lowercased().hasPrefix("0x") {
-            return UInt64(token.dropFirst(2), radix: 16)
-        }
-
-        return UInt64(token)
+        let hex = slice.map { String(format: "%02x", $0) }.joined(separator: " ")
+        return hex + more
     }
 
-    private func parseAddress(_ functionField: String) -> UInt64? {
-        let s = functionField.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard s.lowercased().hasPrefix("0x") else { return nil }
-        guard let value = UInt64(s.dropFirst(2), radix: 16) else { return nil }
-        guard value <= UInt64(UInt.max) else { return nil }
-        return value
+    private func saveLastFileDataToDocuments() {
+        guard let data = customLastFileData else { return }
+        let name = (customFilePath as NSString).lastPathComponent
+        let safeName = name.isEmpty ? "remote_file.bin" : name
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let dest = docs.appendingPathComponent(safeName)
+        do {
+            try data.write(to: dest)
+            mgr.logmsg("(rc) saved \(data.count) bytes to \(dest.path)")
+        } catch {
+            mgr.logmsg("(rc) failed to save file: \(error.localizedDescription)")
+        }
     }
 }

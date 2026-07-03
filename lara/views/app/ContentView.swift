@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @EnvironmentObject private var mgr: laramgr
     @ObservedObject private var logger = globallogger
+    @ObservedObject private var server = LocalFileServer.shared
     @AppStorage("selectedMethod") private var selectedmethod: method = .hybrid
     @AppStorage("logsdisplaymode") private var selectedlogsdisplaymode: logsdisplaymode = .toolbar
     @AppStorage("loggerNoBS") private var loggernobs: Bool = true
@@ -258,20 +259,89 @@ struct ContentView: View {
     }
     
     private var ActionsSection: some View {
-        Section(header: HeaderLabel(text: "Actions", icon: "wrench.and.screwdriver")) {
+        Section(header: HeaderLabel(text: "Actions", icon: "wrench.and.screwdriver"), footer: serverFooter) {
             Button("Respring", action: {
                 mgr.respring()
             })
-            
+
             Button("Panic!", action: {
                 mgr.panic()
             })
-            
+
             if isdebugged() {
                 Button("Detach Debugger", action: {
                     exit(0)
                 })
             }
+
+            serverControls
+        }
+    }
+
+    @ViewBuilder
+    private var serverControls: some View {
+        if server.isRunning {
+            if let url = server.urlString {
+                Button {
+                    UIPasteboard.general.string = url
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    LabeledContent("Server URL") {
+                        Text(url)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            } else {
+                LabeledContent("Server") {
+                    Text("port \(server.port) — no Wi-Fi IP")
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            LabeledContent("User") {
+                Text(server.username)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            Button {
+                UIPasteboard.general.string = server.password
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                LabeledContent("Password") {
+                    Text(server.password)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Button("Stop Local Server", role: .destructive) {
+                server.stop()
+            }
+        } else {
+            Button("Start Local Server") {
+                server.start()
+            }
+            .disabled(!mgr.sbxready)
+        }
+
+        if let err = server.lastError {
+            Text(err)
+                .font(.footnote)
+                .foregroundColor(.red)
+        }
+    }
+
+    @ViewBuilder
+    private var serverFooter: some View {
+        if !mgr.sbxready && !server.isRunning {
+            Text("Local Server needs filesystem access. Click \"Run Exploit\", then \"Initialize System\" first.")
+        } else if server.isRunning {
+            Text("Read-only HTTP server. On a computer on the same Wi-Fi, open the URL in a browser, or pull the whole filesystem (resumable) with:\n`wget -r -np -c --user=\(server.username) --password=<password> \(server.urlString.map { $0 + "/" } ?? "http://<ip>:\(server.port)/")`\nThe app is kept awake while the server runs.")
+        } else {
+            Text("Serves the device filesystem over HTTP so you can download files and folders to your computer.")
         }
     }
     
